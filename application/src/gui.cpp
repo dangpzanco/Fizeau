@@ -16,6 +16,7 @@
 // along with Fizeau.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <algorithm>
+#include <bit>
 #include <tuple>
 #include <imgui.h>
 #include <imgui_deko3d.h>
@@ -72,22 +73,14 @@ bool new_slider(auto name, auto label, T &val, T min, T max, auto fmt, Args &&..
     return ret;
 };
 
-template <std::size_t N>
-bool new_combo(auto name, auto label, auto &val, const std::array<const char *, N> &names) {
-    auto [width, height] = im::GetIO().DisplaySize;
-    auto slider_pos = im::GetWindowPos().x + 0.04f * width;
-    im::TextUnformatted(name); im::SameLine(); im::SetCursorPosX(slider_pos);
-    return im::Combo(label, reinterpret_cast<int *>(&val), names.data(), names.size());
-}
-
 bool new_times(auto name, auto labelh, auto labelm, Time &t) {
+    auto [width, height] = im::GetIO().DisplaySize;
     im::PushItemWidth(im::GetWindowWidth() * 0.2f);
     FZ_SCOPEGUARD([] { im::PopItemWidth(); });
 
     bool ret = false;
-    im::SetCursorPosX(50.0f);
     im::TextUnformatted(name);
-    im::SameLine(); im::SetCursorPosX(150.0f);
+    im::SameLine(); im::SetCursorPosX(0.08f * width);
     int int_h = t.h, int_m = t.m;
     ret |= im::DragInt(labelh, &int_h, 0.05f, 0, 23, "%02dh");
     ret |= swkbd::handle(labelh, &int_h, 0, 23);
@@ -100,13 +93,14 @@ bool new_times(auto name, auto labelh, auto labelm, Time &t) {
 };
 
 bool new_range(auto name, auto labelcb, auto labello, auto labelhi, ColorRange &range) {
+    auto [width, height] = im::GetIO().DisplaySize;
     im::PushItemWidth(im::GetWindowWidth() * 0.2f);
     FZ_SCOPEGUARD([] { im::PopItemWidth(); });
 
     bool is_full_range = (range.lo == MIN_RANGE) && (range.hi == MAX_RANGE);
     bool ret = false;
     im::TextUnformatted(name);
-    im::SameLine(); im::SetCursorPosX(150.0f);
+    im::SameLine(); im::SetCursorPosX(0.08f * width);
     if (im::Checkbox(labelcb, &is_full_range)) {
         ret = true;
         if (is_full_range)
@@ -114,8 +108,9 @@ bool new_range(auto name, auto labelcb, auto labello, auto labelhi, ColorRange &
         else
             range = DEFAULT_LIMITED_RANGE;
     }
-    im::SetCursorPosX(50.0f);
+    im::SetCursorPosX(0.03f * width);
     im::TextUnformatted("Min:"); im::SameLine();
+    im::SetCursorPosX(0.08f * width);
     ret |= im::DragFloat(labello, &range.lo, 0.005f, 0.0f, range.hi, "%.02f");
     ret |= swkbd::handle(labello, &range.lo, 0.0f, range.hi, "%.02f");
     im::SameLine();
@@ -180,7 +175,7 @@ Result draw_profile_tab(Config &ctx) {
             return rc;
     }
 
-    im::Separator();
+    im::SeparatorEx(ImGuiSeparatorFlags_Horizontal, 3.0f);
     im::TextUnformatted("Currently editing profile:");
     if (im::Combo("##editp", reinterpret_cast<int *>(&ctx.cur_profile_id), profile_names.data(), profile_names.size())) {
         if (auto rc = ctx.open_profile(ctx.cur_profile_id); R_FAILED(rc))
@@ -207,37 +202,46 @@ Result draw_color_tab(Config &ctx) {
     if (!im::BeginTabItem("Colors"))
         return 0;
 
+    auto [width, height] = im::GetIO().DisplaySize;
+
     static bool enable_extra_hot_temps = false;
     if ((ctx.profile.day_settings.temperature > D65_TEMP) ||(ctx.profile.night_settings.temperature > D65_TEMP))
         enable_extra_hot_temps = true;
 
     // Temperature sliders
-    im::TextUnformatted("Temperature");
+    im::SeparatorText("Temperature");
     auto max_temp = enable_extra_hot_temps ? MAX_TEMP : D65_TEMP;
     ctx.is_editing_day_profile   |= new_slider("Day:",   "##tempd", ctx.profile.day_settings.temperature,   MIN_TEMP, max_temp, "%d°K");
     ctx.is_editing_night_profile |= new_slider("Night:", "##tempn", ctx.profile.night_settings.temperature, MIN_TEMP, max_temp, "%d°K");
     im::Checkbox("Enable blue temperatures", &enable_extra_hot_temps);
 
-    im::Separator();
-
     // Saturation sliders
-    im::TextUnformatted("Saturation");
+    im::SeparatorText("Saturation");
     ctx.is_editing_day_profile   |= new_slider("Day:",   "##satd", ctx.profile.day_settings.saturation,   MIN_SAT, MAX_SAT, "%.2f");
     ctx.is_editing_night_profile |= new_slider("Night:", "##satn", ctx.profile.night_settings.saturation, MIN_SAT, MAX_SAT, "%.2f");
 
-    im::Separator();
-
     // Hue sliders
-    im::TextUnformatted("Hue");
+    im::SeparatorText("Hue");
     ctx.is_editing_day_profile   |= new_slider("Day:",   "##hued", ctx.profile.day_settings.hue,   MIN_HUE, MAX_HUE, "%.2f");
     ctx.is_editing_night_profile |= new_slider("Night:", "##huen", ctx.profile.night_settings.hue, MIN_HUE, MAX_HUE, "%.2f");
 
-    im::Separator();
+    // Components checkboxes
+    im::SeparatorText("Channels");
 
-    // Filter combos
-    im::TextUnformatted("Filter");
-    ctx.is_editing_day_profile   |= new_combo("Day:",   "##filterd", ctx.profile.day_settings.filter,   filters_names);
-    ctx.is_editing_night_profile |= new_combo("Night:", "##filtern", ctx.profile.night_settings.filter, filters_names);
+    auto items_pos = im::GetWindowPos().x + 0.09f * width;
+
+    std::uint32_t c = ctx.profile.components;
+    im::TextUnformatted("Components:");  im::SameLine(); im::SetCursorPosX(items_pos);
+    im::CheckboxFlags("Red##compr",   &c, Component_Red);   im::SameLine();
+    im::CheckboxFlags("Green##compg", &c, Component_Green); im::SameLine();
+    im::CheckboxFlags("Blue##compb",  &c, Component_Blue);
+    ctx.profile.components = static_cast<Component>(c);
+
+    int filter = (ctx.profile.filter == Component_None) ? 0 : std::countr_zero(static_cast<std::uint32_t>(ctx.profile.filter)) + 1;
+    im::TextUnformatted("Filter:"); im::SameLine(); im::SetCursorPosX(items_pos);
+    im::SetNextItemWidth(0.2f * width);
+    if (im::Combo("##filter", &filter, filters_names.data(), filters_names.size()))
+        ctx.profile.filter = static_cast<Component>(filter ? BIT(filter - 1) : filter);
 
     im::EndTabItem();
     return 0;
@@ -248,20 +252,17 @@ Result draw_correction_tab(Config &ctx) {
         return 0;
 
     // Gamma sliders
-    im::TextUnformatted("Gamma");
+    im::SeparatorText("Gamma");
     ctx.is_editing_day_profile   |= new_slider("Day:",   "##gammad", ctx.profile.day_settings.gamma,   MIN_GAMMA, MAX_GAMMA, "%.2f");
     ctx.is_editing_night_profile |= new_slider("Night:", "##gamman", ctx.profile.night_settings.gamma, MIN_GAMMA, MAX_GAMMA, "%.2f");
 
-    im::Separator();
-
     // Luminance sliders
-    im::TextUnformatted("Luminance");
+    im::SeparatorText("Luminance");
     ctx.is_editing_day_profile   |= new_slider("Day:",   "##lumad", ctx.profile.day_settings.luminance,   MIN_LUMA, MAX_LUMA, "%.2f", true);
     ctx.is_editing_night_profile |= new_slider("Night:", "##luman", ctx.profile.night_settings.luminance, MIN_LUMA, MAX_LUMA, "%.2f", true);
 
     // Color range sliders
-    im::Separator();
-    im::TextUnformatted("Color range:");
+    im::SeparatorText("Color range");
     ctx.is_editing_day_profile   |= new_range("Day:",   "Full range##d", "##rangeld", "##ranghd", ctx.profile.day_settings.range);
     ctx.is_editing_night_profile |= new_range("Night:", "Full range##n", "##rangeln", "##ranghn", ctx.profile.night_settings.range);
 
@@ -273,14 +274,12 @@ Result draw_time_tab(Config &ctx) {
     if (!im::BeginTabItem("Time"))
         return 0;
 
+    auto [width, height] = im::GetIO().DisplaySize;
+
     bool has_changed = false;
 
-    // Times
-    im::TextUnformatted("Hours (drag to set):");
-
     // Dusk
-    im::Separator();
-    im::TextUnformatted("Dusk:");
+    im::SeparatorText("Dusk");
     has_changed |= new_times("Start:", "##dush", "##dusm", ctx.profile.dusk_begin);
     has_changed |= new_times("End:",   "##dueh", "##duem", ctx.profile.dusk_end);
 
@@ -292,8 +291,7 @@ Result draw_time_tab(Config &ctx) {
     }
 
     // Dawn
-    im::Separator();
-    im::TextUnformatted("Dawn:");
+    im::SeparatorText("Dawn");
     has_changed |= new_times("Start:", "##dash", "##dasm", ctx.profile.dawn_begin);
     has_changed |= new_times("End:",   "##daeh", "##daem", ctx.profile.dawn_end);
 
@@ -309,18 +307,21 @@ Result draw_time_tab(Config &ctx) {
 
     // Dimming timeout
     {
-        im::Separator();
-        im::TextUnformatted("Dimming timeout:");
+        im::SeparatorText("Dimming timeout");
         im::PushItemWidth(im::GetWindowWidth() * 0.2f);
         FZ_SCOPEGUARD([] { im::PopItemWidth(); });
 
-        im::SetCursorPosX(150.0f);
+        im::TextUnformatted("Timeout:");
+
+        im::SameLine(); im::SetCursorPosX(0.08f * width);
         int int_m = ctx.profile.dimming_timeout.m, int_s = ctx.profile.dimming_timeout.s;
         im::DragInt("##dimm", &int_m, 0.05f, 0, 59, "%02dm");
         swkbd::handle("##dimm", &int_m, 0, 59);
         im::SameLine();
         im::DragInt("##dims", &int_s, 0.05f, 0, 59, "%02ds");
         swkbd::handle("##dims", &int_s, 0, 59);
+
+        im::TextUnformatted("Set to 0 to use the system setting");
 
         ctx.profile.dimming_timeout.m = static_cast<std::uint8_t>(int_m), ctx.profile.dimming_timeout.s = static_cast<std::uint8_t>(int_s);
     }
@@ -388,8 +389,8 @@ Result draw_main_window(Config &ctx) {
     FZ_SCOPEGUARD([] { im::End(); });
 
     auto [width, height] = im::GetIO().DisplaySize;
-    im::SetWindowPos( { 0.03f * width, 0.09f * height }, ImGuiCond_Always);
-    im::SetWindowSize({ 0.40f * width, 0.82f * height }, ImGuiCond_Always);
+    im::SetWindowPos( { 0.03f * width, 0.05f * height }, ImGuiCond_Always);
+    im::SetWindowSize({ 0.40f * width, 0.90f * height }, ImGuiCond_Always);
 
     auto *imctx = im::GetCurrentContext();
     if (!imctx->NavWindow)
